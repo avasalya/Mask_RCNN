@@ -50,14 +50,6 @@ if not os.path.exists(COCO_MODEL_PATH):
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
 RGB_DIR = os.path.join(DATA_DIR, 'raw')
 
-# # read all samples path
-# images = []
-# targetFile = 'total.txt'
-# with open(os.path.join(DATA_DIR, targetFile), 'r') as f:
-#     for line in f.readlines():
-#         # make lists of all the images path
-#         images.append(str(os.path.join(RGB_DIR, line.split('.')[0]) + '.png'))
-
 # define classes
 class_names = ['BG', 'Houses', 'Buildings', 'Sheds/Garages']
 
@@ -122,45 +114,6 @@ class SatelliteDataset(utils.Dataset):
         (Houses, Buildings, Sheds/Garages)
     """
 
-    def load_mask(self, width, height, shapes, total_instances):
-
-        """Generate instance masks for shapes of the given image ID.
-        """
-        # create empty mask
-        mask = np.zeros([ width, height, total_instances], dtype=np.uint8)
-
-        # fill each channel with an annotated polygon
-        for i, (shape, _, dims, vertices) in enumerate(shapes):
-            mask[...,i:i+1] = cv2.drawContours(mask[...,i:i+1].copy(), [vertices], contourIdx= 0, color=1, thickness= -1)
-
-        # Handle occlusions
-        occlusion = np.logical_not(mask[:, :, -1]).astype(np.uint8)
-        for i in range(total_instances-2, -1, -1):
-            mask[:, :, i] = mask[:, :, i] * occlusion
-            occlusion = np.logical_and(occlusion, np.logical_not(mask[:, :, i]))
-
-        # Map class names to class IDs.
-        class_ids = np.array([class_names.index(s[0]) for s in shapes])
-
-        return mask.astype(np.bool), class_ids.astype(np.int32)
-
-    def scale_image(self, image, scaled=False, scaled_to=50):
-        """scale original image to speed-up training
-        """
-        if scaled == True:
-            #calculate the 50 percent of original dimensions
-            width = int(image.shape[1] * scaled_to / 100)
-            height = int(image.shape[0] * scaled_to / 100)
-
-            # if input image is too big, resize it
-            dsize = (width, height)
-            new_image = cv2.resize(image, dsize, interpolation = cv2.INTER_CUBIC)
-            print("resized image from {} to {}".format(image.shape, new_image.shape))
-        else:
-            new_image = image
-
-        return new_image, new_image.shape[0], new_image.shape[1]
-
     def load_sample(self, count=1, dataset=train_idx, scaled=False, scaled_to=50, show_fig=True):
         """load the requested number of images.
         count: number of images to generate.
@@ -176,6 +129,7 @@ class SatelliteDataset(utils.Dataset):
         # choose random sample(s)
         samples = rand.sample(range(0, len(dataset)), count)
 
+        # MAIN Loop
         for idx in samples:
 
             # resize images
@@ -244,17 +198,22 @@ class SatelliteDataset(utils.Dataset):
 
         return samples, boxes, areas, shapes
 
-    def load_rgb(self, samples, dataset=train_idx):
-        """This function loads the image from a file using,
-        same sample as generated using method `load_sample`
+    def scale_image(self, image, scaled=False, scaled_to=50):
+        """scale original image to speed-up training
         """
-        for sample in samples:
-            frame_id = dataset[sample]
-            imagePath = os.path.join(RGB_DIR, frame_id)
-            fig=plt.figure(figsize=(12,8), dpi= 100, facecolor='w', edgecolor='k')
-            rgb = plt.imread(imagePath)
-            plt.imshow(rgb)
-            plt.show()
+        if scaled == True:
+            #calculate the 50 percent of original dimensions
+            width = int(image.shape[1] * scaled_to / 100)
+            height = int(image.shape[0] * scaled_to / 100)
+
+            # if input image is too big, resize it
+            dsize = (width, height)
+            new_image = cv2.resize(image, dsize, interpolation = cv2.INTER_CUBIC)
+            print("resized image from {} to {}".format(image.shape, new_image.shape))
+        else:
+            new_image = image
+
+        return new_image, new_image.shape[0], new_image.shape[1]
 
     def draw_polygons(self, image, vertices, shape, draw_bbox=True):
 
@@ -283,6 +242,40 @@ class SatelliteDataset(utils.Dataset):
 
         return image, color, np.append(top_left, bottom_right), area
 
+    def load_mask(self, width, height, shapes, total_instances):
+
+        """Generate instance masks for shapes of the given image ID.
+        """
+        # create empty mask
+        mask = np.zeros([ width, height, total_instances], dtype=np.uint8)
+
+        # fill each channel with an annotated polygon
+        for i, (shape, _, dims, vertices) in enumerate(shapes):
+            mask[...,i:i+1] = cv2.drawContours(mask[...,i:i+1].copy(), [vertices], contourIdx= 0, color=1, thickness= -1)
+
+        # Handle occlusions
+        occlusion = np.logical_not(mask[:, :, -1]).astype(np.uint8)
+        for i in range(total_instances-2, -1, -1):
+            mask[:, :, i] = mask[:, :, i] * occlusion
+            occlusion = np.logical_and(occlusion, np.logical_not(mask[:, :, i]))
+
+        # Map class names to class IDs.
+        class_ids = np.array([class_names.index(s[0]) for s in shapes])
+
+        return mask.astype(np.bool), class_ids.astype(np.int32)
+
+    def load_rgb(self, samples, dataset=train_idx):
+        """This function loads the image from a file using,
+        same sample as generated using method `load_sample`
+        """
+        for sample in samples:
+            frame_id = dataset[sample]
+            imagePath = os.path.join(RGB_DIR, frame_id)
+            fig=plt.figure(figsize=(12,8), dpi= 100, facecolor='w', edgecolor='k')
+            rgb = plt.imread(imagePath)
+            plt.imshow(rgb)
+            plt.show()
+
     def image_reference(self, image_id):
         """Return the shapes data of the image."""
         info = self.image_info[image_id]
@@ -294,40 +287,22 @@ class SatelliteDataset(utils.Dataset):
 
 # Training dataset
 dataset_train = SatelliteDataset()
-samples, boxes, areas, shapes = dataset_train.load_sample(count=2,
+train_samples, train_boxes, train_areas, train_shapes = dataset_train.load_sample(count=2,
                                                         dataset=train_idx,
                                                         scaled=True,
                                                         scaled_to=50,
-                                                        show_fig=False)
+                                                        show_fig=True)
 dataset_train.prepare()
-# dataset_train.load_rgb(samples, train_idx)
+# dataset_train.load_rgb(train_samples, train_idx)
 
-
-
-# # Validation dataset
-# dataset_val = SatelliteDataset()
-# dataset_val.load_sample(50, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1])
-# dataset_val.prepare()
-
-
-
-# image_ids = np.random.choice(dataset_train.image_ids, 1)
-# for image_id in image_ids:
-#     image = dataset_train.load_rgb(image_id)
-#     mask, class_ids = dataset_train.load_mask(image_id)
-#     visualize.display_top_masks(image, mask, class_ids, dataset_train.class_names)
-
-
-
-# Load and display 'n' random samples
-# image_ids = np.random.choice(dataset_train.image_ids, 4)
-# dataset_train.load_rgb(image_id)
-
-# for i in range(3):
-#     image_id = rand.choice(range(0,len(totalSamples)))
-#     image = dataset_train.load_rgb(image_id)
-#     mask, class_ids = dataset_train.load_mask(image_id)
-#     visualize.display_top_masks(image, mask, class_ids, dataset_train.class_names)
+# Validation dataset
+dataset_val = SatelliteDataset()
+val_samples, val_boxes, val_areas, val_shapes = dataset_val.load_sample(count=2,
+                                                        dataset=valid_idx,
+                                                        scaled=True,
+                                                        scaled_to=50,
+                                                        show_fig=True)
+dataset_val.prepare()
 
 # %% [markdown]
 # ## Create Model
