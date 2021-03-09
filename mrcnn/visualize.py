@@ -51,7 +51,7 @@ def display_images(images, titles=None, cols=4, cmap=None, norm=None,
         plt.title(title, fontsize=9)
         plt.axis('off')
         plt.imshow(image.astype(np.uint8), cmap=cmap,
-                   norm=norm, interpolation=interpolation)
+                norm=norm, interpolation=interpolation)
         i += 1
     plt.show()
 
