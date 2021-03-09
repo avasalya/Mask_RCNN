@@ -223,7 +223,7 @@ class SatelliteDataset(utils.Dataset):
         # draw segmented polygon
         cv2.drawContours(image, [vertices], contourIdx= 0, color= color, thickness= -1)
 
-        # draw (rotated) rectangle
+        # compute the bounding boxes from instance masks
         rect = cv2.minAreaRect(vertices)
         bbox = cv2.boxPoints(rect)
         bbox = np.int0(bbox)
@@ -290,7 +290,7 @@ dataset_train = SatelliteDataset()
 train_samples, train_boxes, train_areas, train_shapes = dataset_train.load_sample(count=2,
                                                         dataset=train_idx,
                                                         scaled=True,
-                                                        scaled_to=50,
+                                                        scaled_to=30,
                                                         show_fig=True)
 dataset_train.prepare()
 # dataset_train.load_rgb(train_samples, train_idx)
@@ -300,17 +300,16 @@ dataset_val = SatelliteDataset()
 val_samples, val_boxes, val_areas, val_shapes = dataset_val.load_sample(count=2,
                                                         dataset=valid_idx,
                                                         scaled=True,
-                                                        scaled_to=50,
+                                                        scaled_to=30,
                                                         show_fig=True)
 dataset_val.prepare()
 
 # %% [markdown]
 # ## Create Model
 
-# %%
 # Create model in training mode
 model = modellib.MaskRCNN(mode="training", config=config,
-                          model_dir=MODEL_DIR)
+                        model_dir=MODEL_DIR)
 
 
 # %%
