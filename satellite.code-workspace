@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../incubit/Mask_RCNN"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"python.pythonPath": "/home/ash/anaconda3/envs/maskrcnn/bin/python"
+	}
+}
