@@ -15,7 +15,6 @@ import cv2
 import time
 import math
 import random
-import random as rand
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -33,8 +32,8 @@ import mrcnn.model as modellib
 from mrcnn import visualize
 from mrcnn.model import log
 
-from IPython import get_ipython
-get_ipython().run_line_magic('matplotlib', 'inline')
+# from IPython import get_ipython
+# get_ipython().run_line_magic('matplotlib', 'inline')
 
 # Directory to save logs and trained model
 MODEL_DIR = os.path.join(ROOT_DIR, "logs")
@@ -57,8 +56,8 @@ class_names = ['BG', 'Houses', 'Buildings', 'Sheds/Garages']
 totalSamples = os.listdir(RGB_DIR)
 
 # create training and testing sets
-train_idx, valid_idx = train_test_split(totalSamples, test_size = 0.20)
-eval_idx = os.listdir(os.path.join(DATA_DIR, 'eval'))
+train_indices, valid_indices = train_test_split(totalSamples, test_size = 0.20)
+eval_indices = os.listdir(os.path.join(DATA_DIR, 'eval'))
 
 # "Return a Matplotlib Axes array to be used in all visualizations in the notebook
 def get_ax(rows=1, cols=1, size=8):
@@ -81,7 +80,7 @@ class ShapesConfig(Config):
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
     GPU_COUNT = 1
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 8
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 3  # background + 3 shapes
@@ -96,7 +95,7 @@ class ShapesConfig(Config):
 
     # Reduce training ROIs per image because the images are small and have
     # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
-    TRAIN_ROIS_PER_IMAGE = 200
+    TRAIN_ROIS_PER_IMAGE = 32
 
     # Use a small epoch since the data is simple
     STEPS_PER_EPOCH = 100
@@ -107,80 +106,33 @@ class ShapesConfig(Config):
 config = ShapesConfig()
 # config.display()
 
-# %% [markdown]
-
 class SatelliteDataset(utils.Dataset):
     """The dataset consists of three classes:
         (Houses, Buildings, Sheds/Garages)
     """
 
-    def load_shapes(self, count, height, width):
-        """Generate the requested number of synthetic images.
-        count: number of images to generate.
-        height, width: the size of the generated images.
-        """
-        # Add classes
-        self.add_class("shapes", 1, "Houses")
-        self.add_class("shapes", 2, "Buildings")
-        self.add_class("shapes", 3, "Sheds/Garages")
-
-        # Add images
-        # Generate random specifications of images (i.e. color and
-        # list of shapes sizes and locations). This is more compact than
-        # actual images. Images are generated on the fly in load_image().
-        for i in range(count):
-            bg_color, shapes = self.random_image(height, width)
-            self.add_image("shapes", image_id=i, path=None,
-                        width=width, height=height,
-                        bg_color=bg_color, shapes=shapes)
-
-
-    def random_image(self, height, width):
-
-        # Pick random background color
-        bg_color = np.array([random.randint(0, 255) for _ in range(3)])
-
-        samples, boxes, areas, shapes = self.load_sample(count=2,
-                                                        dataset=dataset,
-                                                        scaled=True,
-                                                        scaled_to=30,
-                                                        show_fig=True)
-
-        # Apply non-max suppression wit 0.3 threshold to avoid shapes covering each other
-        keep_ixs = utils.non_max_suppression(np.array(boxes), np.arange(len(boxes)), 0.3)
-        shapes = [s for i, s in enumerate(shapes) if i in keep_ixs]
-
-        return bg_color, shapes#('classname', 'color', 'bbox')
-
-    def load_image(self, samples, dataset=train_idx):
-        """This function loads the image from a file using,
-        same random sample as generated using method `random_image`
-        """
-        for sample in samples:
-            frame_id = dataset[sample]
-            imagePath = os.path.join(RGB_DIR, frame_id)
-            fig=plt.figure(figsize=(12,8), dpi= 100, facecolor='w', edgecolor='k')
-            rgb = plt.imread(imagePath)
-            plt.imshow(rgb)
-            plt.show()
-
-
-    def load_sample(self, count=1, dataset=train_idx, scaled=False, scaled_to=50, show_fig=True):
+    def load_sample(self, samples, dataset, scaled=False, scaled_to=50, show_fig=True):
         """load the requested number of images.
         count: number of images to generate.
         scaled: whether to resize image or not.
         scaled_to: percentage to resize the image.
         """
-        # choose random sample(s)
-        samples = rand.sample(range(0, len(dataset)), count)
+
+        # Add classes
+        self.add_class("shapes", 1, "Houses")
+        self.add_class("shapes", 2, "Buildings")
+        self.add_class("shapes", 3, "Sheds/Garages")
+
+        # pick samples randomly
+        self.samples = random.sample(range(0, len(dataset)), samples)
 
         # MAIN Loop
-        for image_id, sample in enumerate(samples):
+        for image_id, sample in enumerate(self.samples):
 
             # resize images
             frame_id = dataset[sample]
-            imagePath = os.path.join(RGB_DIR, frame_id)
-            self.image, self.width, self.height = self.scale_image(plt.imread(imagePath),
+            self.imagePath = os.path.join(RGB_DIR, frame_id)
+            self.image, self.width, self.height = self.scale_image(plt.imread(self.imagePath),
                                                                     scaled=scaled,
                                                                     scaled_to=scaled_to)
 
@@ -191,7 +143,7 @@ class SatelliteDataset(utils.Dataset):
             list_vertices = []
 
             # read polygon annotations
-            data = pd.read_json(imagePath.replace('raw', 'annotations').replace('png', 'png-annotated.json'))
+            data = pd.read_json(self.imagePath.replace('raw', 'annotations').replace('png', 'png-annotated.json'))
 
             for shape in range(len(data.labels)):
                 print('found {} {}'.format(len(data.labels[shape]['annotations']), data.labels[shape]['name']))
@@ -223,12 +175,21 @@ class SatelliteDataset(utils.Dataset):
                     shapes.append((data.labels[shape]['name'], color, bbox))
                     list_vertices.append(vertices)
 
-            # create mask for each instances
-            mask, class_ids = self.load_mask(self.width, self.height, shapes, list_vertices, len(boxes))
 
-            # # Apply non-max suppression wit 0.3 threshold to avoid shapes covering each other
-            # keep_ixs = utils.non_max_suppression(np.array(boxes), np.arange(len(boxes)), 0.3)
-            # shapes = [s for i, s in enumerate(shapes) if i in keep_ixs]
+            # Pick random background color
+            bg_color = np.array([random.randint(0, 255) for _ in range(3)])
+
+            # collect all necessary data
+            self.add_image("shapes", image_id=image_id, path=self.imagePath,
+                            width=self.width, height=self.height,
+                            bg_color=bg_color, shapes=shapes, list_vertices=list_vertices, image=self.image)
+
+            # Apply non-max suppression wit 0.3 threshold to avoid shapes covering each other
+            keep_ixs = utils.non_max_suppression(np.array(boxes), np.arange(len(boxes)), 0.3)
+            shapes = [s for i, s in enumerate(shapes) if i in keep_ixs]
+
+            # create mask for each instances
+            mask, class_ids = self.load_mask(image_id)
 
             if show_fig == True:
                 fig=plt.figure(figsize=(12,8), dpi= 100, facecolor='w', edgecolor='k')
@@ -236,7 +197,7 @@ class SatelliteDataset(utils.Dataset):
                 plt.show()
                 visualize.display_top_masks(self.image, mask, class_ids, class_names)
 
-        return samples, boxes, areas, shapes
+        # return boxes, areas, shapes
 
     def scale_image(self, image, scaled=False, scaled_to=50):
         """scale original image to speed-up training
@@ -258,10 +219,9 @@ class SatelliteDataset(utils.Dataset):
     def draw_polygons(self, image, vertices, shape, draw_bbox=True):
 
         color = tuple([random.randint(0, 255) for _ in range(3)])
-        # print(color)
 
         # draw segmented polygon
-        cv2.drawContours(image, [vertices], contourIdx= 0, color= color, thickness= -1)
+        cv2.drawContours(image, [vertices], contourIdx= 0, color=color, thickness= -1)
 
         # compute the bounding boxes from instance masks
         rect = cv2.minAreaRect(vertices)
@@ -274,24 +234,28 @@ class SatelliteDataset(utils.Dataset):
 
         # plot bounding box
         if draw_bbox:
-            cv2.drawContours(image, [bbox] , 0, color, 4)
-            # print(bbox)
+            cv2.drawContours(image, [bbox] , 0, color, 2)
 
         # get area of bounding box
         area = cv2.contourArea(vertices)
 
-        return image, color, np.append(top_left, bottom_right), area
+        return image, color, tuple(list(np.append(top_left, bottom_right))), area
 
-    def load_mask(self, width, height, shapes, list_vertices, total_instances):
+    def load_mask(self, image_id):
 
         """Generate instance masks for shapes of the given image ID.
         """
+        info = self.image_info[image_id]
+        shapes = info['shapes']
+        list_vertices = info['list_vertices']
+        total_instances = len(shapes)
+
         # create empty mask
-        mask = np.zeros([ width, height, total_instances], dtype=np.uint8)
+        mask = np.zeros([ self.width, self.height, total_instances], dtype=np.uint8)
 
         # fill each channel with an annotated polygon
-        for i, (shape, _, dims, vertices) in enumerate(shapes, list_vertices):
-            mask[...,i:i+1] = cv2.drawContours(mask[...,i:i+1].copy(), [vertices], contourIdx= 0, color=1, thickness= -1)
+        for i, (shape, _, dims) in enumerate(shapes):
+            mask[...,i:i+1] = cv2.drawContours(mask[...,i:i+1].copy(), [list_vertices[i]], contourIdx= 0, color=1, thickness= -1)
 
         # Handle occlusions
         occlusion = np.logical_not(mask[:, :, -1]).astype(np.uint8)
@@ -304,6 +268,18 @@ class SatelliteDataset(utils.Dataset):
 
         return mask.astype(np.bool), class_ids.astype(np.int32)
 
+    def load_image(self, image_id):
+        """This function loads the image from a file using,
+        same sample as generated using method `load_sample`
+        """
+        # image = plt.imread(self.image_info[image_id]['image'])
+        image = self.image_info[image_id]['image']
+        # fig=plt.figure(figsize=(12,8), dpi= 100, facecolor='w', edgecolor='k')
+        # plt.imshow((image* 255).astype(np.uint8))
+        # plt.show()
+
+        return image
+
     def image_reference(self, image_id):
         """Return the shapes data of the image."""
         info = self.image_info[image_id]
@@ -312,45 +288,37 @@ class SatelliteDataset(utils.Dataset):
         else:
             super(self.__class__).image_reference(self, image_id)
 
+# Training dataset
+dataset = SatelliteDataset()
+dataset.load_sample(1, train_indices, scaled=True, scaled_to=30, show_fig=False)
+dataset.prepare()
 
-
-dataset_train = SatelliteDataset()
-
-
-
-train_samples, train_boxes, train_areas, train_shapes = dataset_train.load_sample(count=1,
-                                                        dataset=train_idx,
-                                                        scaled=True,
-                                                        scaled_to=30,
-                                                        show_fig=True)
-
-
-dataset_train.load_shapes(count=500, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1])
-dataset_train.prepare()
-
-
-# # Training dataset
-# train_samples, train_boxes, train_areas, train_shapes = dataset_train.random_image(count=2,
-#                                                         dataset=train_idx,
-#                                                         scaled=True,
-#                                                         scaled_to=30,
-#                                                         show_fig=True)
-# dataset_train.prepare()
-# # dataset_train.load_image(train_samples, train_idx)
-
-# # Validation dataset
-# dataset_val = SatelliteDataset()
-# val_samples, val_boxes, val_areas, val_shapes = dataset_val.random_image(count=2,
-#                                                         dataset=valid_idx,
-#                                                         scaled=True,
-#                                                         scaled_to=30,
-#                                                         show_fig=False)
-# dataset_val.prepare()
+# Load and display random samples
+for image_id in dataset.image_ids:
+    print('image ID', image_id)
+    print('image path', dataset.image_info[image_id]['path'])
+    image = dataset.load_image(image_id)
+    mask, class_ids = dataset.load_mask(image_id)
+    visualize.display_top_masks(image, mask, class_ids, dataset.class_names)
 
 #%%
 
-print(dataset_train)
+# Training dataset
+print('loading training dataset...')
+dataset_train = SatelliteDataset()
+dataset_train.load_sample(5, #len(train_indices),
+                        train_indices, scaled=True, scaled_to=30, show_fig=False)
+dataset_train.prepare()
 
+
+# Validation dataset
+print('loading validation dataset...')
+dataset_val = SatelliteDataset()
+dataset_val.load_sample(1, #len(valid_indices),
+                        valid_indices, scaled=True, scaled_to=30, show_fig=False)
+dataset_val.prepare()
+
+print('datasets loaded!')
 # %% [markdown]
 # ## Create Model
 
@@ -369,8 +337,8 @@ elif init_with == "coco":
     # are different due to the different number of classes
     # See README for instructions to download the COCO weights
     model.load_weights(COCO_MODEL_PATH, by_name=True,
-                       exclude=["mrcnn_class_logits", "mrcnn_bbox_fc",
-                                "mrcnn_bbox", "mrcnn_mask"])
+                        exclude=["mrcnn_class_logits", "mrcnn_bbox_fc",
+                        "mrcnn_bbox", "mrcnn_mask"])
 elif init_with == "last":
     # Load the last model you trained and continue training
     model.load_weights(model.find_last(), by_name=True)
@@ -381,7 +349,7 @@ elif init_with == "last":
 # Train in two stages:
 # 1. Only the heads. Here we're freezing all the backbone layers and training only the randomly initialized layers (i.e. the ones that we didn't use pre-trained weights from MS COCO). To train only the head layers, pass `layers='heads'` to the `train()` function.
 #
-# 2. Fine-tune all layers. Simply pass `layers="all` to train all layers.
+# 2. Fine-tune all layers. For this simple example it's not necessary, but we're including it to show the process. Simply pass `layers="all` to train all layers.
 
 # %%
 # Train the head branches
