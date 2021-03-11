@@ -310,9 +310,9 @@ class Dataset(object):
         self.class_names = [clean_name(c["name"]) for c in self.class_info]
         print('class names', self.class_names)
         self.num_images = len(self.image_info)
-        print('num_images', self.num_images)
+        print('total samples', self.num_images)
         self._image_ids = np.arange(self.num_images)
-        print('image_ids', self.image_ids)
+        # print('image_ids', self.image_ids)
 
         # Mapping from source class and image IDs to internal IDs
         self.class_from_source_map = {"{}.{}".format(info['source'], info['id']): id
